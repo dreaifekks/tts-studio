@@ -108,52 +108,66 @@ struct CharacterVersionsView: View {
         .onChange(of: manager.evalSet) {
             manager.evaluationSet = manager.evalSet
         }
-        .onChange(of: manager.sort + "|" + manager.order) { synchronizeSortIndicator() }
-        .task(id: manager.queryKey) {
-            do { try await manager.load() }
-            catch is CancellationError { }
-            catch { studio.errorMessage = error.localizedDescription }
-        }
-        .task(id: manager.pairKey) {
-            do { try await manager.loadPair(studio: studio) }
-            catch is CancellationError { }
-            catch { studio.errorMessage = error.localizedDescription }
-        }
-        .onChange(of: manager.selectedID) {
-            guard let entry = manager.selected else { return }
-            displayName = entry.display_name ?? ""
-            note = entry.note
-            if !entry.hidden {
-                manager.useManualPair()
-                if let entryChar = entry.character { manager.pairCharacter = entryChar }
-                manager.pairEngine = entry.engine
-                if entry.type == "gpt" { manager.gptID = entry.id } else { manager.sovitsID = entry.id }
-            }
-        }
-        .onChange(of: sortOrder) {
-            guard let comparator = sortOrder.first else { return }
-            let keys: [(AnyKeyPath, String)] = [
-                (\WeightEntry.modelLabel, "name"),
-                (\WeightEntry.characterLabel, "character"),
-                (\WeightEntry.engine, "engine"),
-                (\WeightEntry.typeLabel, "type"),
-                (\WeightEntry.epochValue, "epoch"),
-                (\WeightEntry.source, "source"),
-                (\WeightEntry.scoreValue, "score"),
-                (\WeightEntry.created_at, "created_at"),
-                (\WeightEntry.size_bytes, "size")
-            ]
-            if let field = keys.first(where: { $0.0 == comparator.keyPath })?.1 {
-                manager.sort = field
-                manager.order = comparator.order == .forward ? "asc" : "desc"
-            }
-        }
-        .confirmationDialog("删除这个模型？默认声音会使用可用的其他模型。", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+        .onChange(of: sortStateKey) { synchronizeSortIndicator() }
+        .task(id: manager.queryKey) { await loadWeightsTask() }
+        .task(id: manager.pairKey) { await loadPairTask() }
+        .onChange(of: manager.selectedID) { handleSelectedWeightChange() }
+        .onChange(of: sortOrder) { handleSortOrderChange() }
+        .confirmationDialog("删除这个模型？默认声音会使用可用的其他模型。", isPresented: deleteDialogPresented) {
             if let entry = deleting {
                 Button("删除 \(entry.label)", role: .destructive) {
                     studio.perform { try await manager.delete(entry, studio: studio); deleting = nil }
                 }
             }
+        }
+    }
+
+    private var sortStateKey: String { "\(manager.sort)|\(manager.order)" }
+
+    private var deleteDialogPresented: Binding<Bool> {
+        Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
+    }
+
+    private func loadWeightsTask() async {
+        do { try await manager.load() }
+        catch is CancellationError { }
+        catch { studio.errorMessage = error.localizedDescription }
+    }
+
+    private func loadPairTask() async {
+        do { try await manager.loadPair(studio: studio) }
+        catch is CancellationError { }
+        catch { studio.errorMessage = error.localizedDescription }
+    }
+
+    private func handleSelectedWeightChange() {
+        guard let entry = manager.selected else { return }
+        displayName = entry.display_name ?? ""
+        note = entry.note
+        if !entry.hidden {
+            manager.useManualPair()
+            if let entryChar = entry.character { manager.pairCharacter = entryChar }
+            manager.pairEngine = entry.engine
+            if entry.type == "gpt" { manager.gptID = entry.id } else { manager.sovitsID = entry.id }
+        }
+    }
+
+    private func handleSortOrderChange() {
+        guard let comparator = sortOrder.first else { return }
+        let keys: [(AnyKeyPath, String)] = [
+            (\WeightEntry.modelLabel, "name"),
+            (\WeightEntry.characterLabel, "character"),
+            (\WeightEntry.engine, "engine"),
+            (\WeightEntry.typeLabel, "type"),
+            (\WeightEntry.epochValue, "epoch"),
+            (\WeightEntry.source, "source"),
+            (\WeightEntry.scoreValue, "score"),
+            (\WeightEntry.created_at, "created_at"),
+            (\WeightEntry.size_bytes, "size")
+        ]
+        if let field = keys.first(where: { $0.0 == comparator.keyPath })?.1 {
+            manager.sort = field
+            manager.order = comparator.order == .forward ? "asc" : "desc"
         }
     }
 

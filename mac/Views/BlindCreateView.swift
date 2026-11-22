@@ -67,60 +67,71 @@ struct BlindCreateView: View {
         }
         .padding(24)
         .frame(minWidth: 680, idealWidth: 780, minHeight: 620, idealHeight: 720)
-        .onAppear {
-            let preferred = studio.preferredEngine
-            if let prefill, !appliedPrefill {
-                character = prefill.character
-                if !editedA {
-                    if let comboA = prefill.comboA { a = comboA } else { a.engine = preferred }
-                }
-                if !editedB {
-                    if let comboB = prefill.comboB { b = comboB } else { b.engine = preferred }
-                }
-            } else {
-                if !editedA { a.engine = preferred }
-                if !editedB { b.engine = preferred }
-                if character.isEmpty, !studio.params.character.isEmpty {
-                    character = studio.params.character
-                }
-            }
-        }
+        .onAppear { handleOnAppear() }
         .onChange(of: character) { oldValue, newValue in
             if !oldValue.isEmpty, oldValue != newValue {
                 editedA = false
                 editedB = false
             }
         }
-        .task {
-            do {
-                try await manager.prepare()
-                evalSet = manager.evalSets.first(where: { $0.default })?.name ?? "hard"
-            } catch { self.error = error.localizedDescription }
+        .task { await prepareManager() }
+        .task(id: versionsTaskID) { await loadVersionsForCharacter() }
+    }
+
+    private var versionsTaskID: String {
+        let slugs = studio.models.map(\.slug).joined(separator: ",")
+        return "\(studio.api.baseURL)|\(character)|\(slugs)|\(studio.modelCompletionKey)"
+    }
+
+    private func handleOnAppear() {
+        let preferred = studio.preferredEngine
+        if let prefill, !appliedPrefill {
+            character = prefill.character
+            if !editedA {
+                if let comboA = prefill.comboA { a = comboA } else { a.engine = preferred }
+            }
+            if !editedB {
+                if let comboB = prefill.comboB { b = comboB } else { b.engine = preferred }
+            }
+        } else {
+            if !editedA { a.engine = preferred }
+            if !editedB { b.engine = preferred }
+            if character.isEmpty, !studio.params.character.isEmpty {
+                character = studio.params.character
+            }
         }
-        .task(id: studio.api.baseURL + "|" + character + "|" + studio.models.map(\.slug).joined(separator: ",") + "|" + studio.modelCompletionKey) {
-            do {
-                guard let selected = preferredBlindCharacter(character, available: studio.models.map(\.slug)) else { versions.reset(); return }
-                if character != selected { character = selected; return }
-                let targetCharacter = character
-                let changed = versions.character != targetCharacter
-                try await versions.load(api: studio.api, character: targetCharacter)
-                guard !Task.isCancelled else { return }
-                Self.applyLoadedVersions(
-                    targetCharacter: targetCharacter,
-                    currentCharacter: character,
-                    versions: versions.rows,
-                    selectedVersion: versions.selected,
-                    changedCharacter: changed,
-                    prefill: prefill,
-                    appliedPrefill: &appliedPrefill,
-                    editedA: editedA,
-                    editedB: editedB,
-                    a: &a,
-                    b: &b
-                )
-            } catch is CancellationError { }
-            catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-        }
+    }
+
+    private func prepareManager() async {
+        do {
+            try await manager.prepare()
+            evalSet = manager.evalSets.first(where: { $0.default })?.name ?? "hard"
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func loadVersionsForCharacter() async {
+        do {
+            guard let selected = preferredBlindCharacter(character, available: studio.models.map(\.slug)) else { versions.reset(); return }
+            if character != selected { character = selected; return }
+            let targetCharacter = character
+            let changed = versions.character != targetCharacter
+            try await versions.load(api: studio.api, character: targetCharacter)
+            guard !Task.isCancelled else { return }
+            Self.applyLoadedVersions(
+                targetCharacter: targetCharacter,
+                currentCharacter: character,
+                versions: versions.rows,
+                selectedVersion: versions.selected,
+                changedCharacter: changed,
+                prefill: prefill,
+                appliedPrefill: &appliedPrefill,
+                editedA: editedA,
+                editedB: editedB,
+                a: &a,
+                b: &b
+            )
+        } catch is CancellationError { }
+        catch { if !Task.isCancelled { self.error = error.localizedDescription } }
     }
 
     private var items: Int { (manager.evalSets.first { $0.name == evalSet }?.sentences.count ?? 0) * repeats }

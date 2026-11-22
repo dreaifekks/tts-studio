@@ -175,6 +175,15 @@ jobs:
           LATEST_TAG: ${{ matrix.latest_tag }}
           ALIAS_TAG: ${{ matrix.alias_tag }}
 
+      - name: Free runner disk space
+        if: matrix.variant == 'cuda'
+        shell: bash
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          docker system prune -af || true
+          df -h /
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

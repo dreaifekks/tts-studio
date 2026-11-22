@@ -55,6 +55,8 @@ XCODE_ARGS=(
   -configuration Release
   -derivedDataPath "$DERIVED_DATA"
   -destination "platform=macOS,arch=${ARCH_NAME}"
+  ARCHS="$ARCH_NAME"
+  ONLY_ACTIVE_ARCH=YES
   CODE_SIGN_IDENTITY="-"
 )
 if [[ -n "$DEPLOY_TARGET" ]]; then

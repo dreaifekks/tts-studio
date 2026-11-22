@@ -15,8 +15,7 @@ ARG TORCH=cu128
 ARG INCLUDE_V5=1
 ARG TTS_VERSION=0.2.0
 ENV DEBIAN_FRONTEND=noninteractive \
-    UV_LINK_MODE=copy \
-    UV_CACHE_DIR=/tmp/uv-cache
+    UV_NO_CACHE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
