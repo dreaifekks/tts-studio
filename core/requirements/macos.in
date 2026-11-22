@@ -1,0 +1,3 @@
+# macOS（Apple Silicon）相对 linux.in 的替换：onnxruntime-gpu 只有 Linux / Windows 的 CUDA 版，换成 CPU 版（同版本）。
+# 和 linux-torch.in、linux.in 一起解出 macos.lock.txt，onnxruntime-gpu 由 macos-overrides.txt 去掉（命令见 macos.lock.txt 开头）。
+onnxruntime==1.23.2

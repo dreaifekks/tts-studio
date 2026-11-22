@@ -1,0 +1,20 @@
+data/
+logs/
+runtime/
+__pycache__/
+samples/
+training/
+weights/
+.venv/
+.ruff_cache/
+# 权重、音频、数据库、日志不进仓库，放错目录时也不会被提交
+*.pth
+*.ckpt
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.db
+*.log
+.pytest_cache/
+colab/HANDOFF.md

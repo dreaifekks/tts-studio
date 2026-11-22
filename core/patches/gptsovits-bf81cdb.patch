@@ -1,0 +1,356 @@
+diff --git a/GPT_SoVITS/AR/data/bucket_sampler.py b/GPT_SoVITS/AR/data/bucket_sampler.py
+index d845733..83d509a 100644
+--- a/GPT_SoVITS/AR/data/bucket_sampler.py
++++ b/GPT_SoVITS/AR/data/bucket_sampler.py
+@@ -36,15 +36,12 @@ class DistributedBucketSampler(Sampler[T_co]):
+         drop_last: bool = False,
+         batch_size: int = 32,
+     ) -> None:
++        distributed_ready = dist.is_available() and dist.is_initialized()
+         if num_replicas is None:
+-            if not dist.is_available():
+-                raise RuntimeError("Requires distributed package to be available")
+-            num_replicas = dist.get_world_size() if torch.cuda.is_available() else 1
++            num_replicas = dist.get_world_size() if distributed_ready else 1
+         if rank is None:
+-            if not dist.is_available():
+-                raise RuntimeError("Requires distributed package to be available")
+-            rank = dist.get_rank() if torch.cuda.is_available() else 0
+-            if torch.cuda.is_available():
++            rank = dist.get_rank() if distributed_ready else 0
++            if distributed_ready and torch.cuda.is_available():
+                 torch.cuda.set_device(rank)
+         if rank >= num_replicas or rank < 0:
+             raise ValueError("Invalid rank {}, rank should be in the interval [0, {}]".format(rank, num_replicas - 1))
+@@ -147,3 +144,5 @@ class DistributedBucketSampler(Sampler[T_co]):
+             epoch (int): Epoch number.
+         """
+         self.epoch = epoch
++
++
+diff --git a/GPT_SoVITS/AR/data/data_module.py b/GPT_SoVITS/AR/data/data_module.py
+index f360503..9e0cd60 100644
+--- a/GPT_SoVITS/AR/data/data_module.py
++++ b/GPT_SoVITS/AR/data/data_module.py
+@@ -50,27 +50,28 @@ class Text2SemanticDataModule(LightningDataModule):
+         )
+         batch_size = max(min(batch_size, len(self._train_dataset) // 4), 1)  # 防止不保存
+         sampler = DistributedBucketSampler(self._train_dataset, batch_size=batch_size)
+-        return DataLoader(
+-            self._train_dataset,
++        loader_kwargs = dict(
++            dataset=self._train_dataset,
+             batch_size=batch_size,
+             sampler=sampler,
+             collate_fn=self._train_dataset.collate,
+             num_workers=self.num_workers,
+-            persistent_workers=True,
+-            prefetch_factor=16,
+         )
+-
++        if self.num_workers > 0:
++            loader_kwargs.update(persistent_workers=True, prefetch_factor=16)
++        return DataLoader(**loader_kwargs)
+     def val_dataloader(self):
+-        return DataLoader(
+-            self._dev_dataset,
++        val_workers = max(self.num_workers, 12)
++        loader_kwargs = dict(
++            dataset=self._dev_dataset,
+             batch_size=1,
+             shuffle=False,
+             collate_fn=self._train_dataset.collate,
+-            num_workers=max(self.num_workers, 12),
+-            persistent_workers=True,
+-            prefetch_factor=16,
++            num_workers=val_workers,
+         )
+-
++        if val_workers > 0:
++            loader_kwargs.update(persistent_workers=True, prefetch_factor=16)
++        return DataLoader(**loader_kwargs)
+     # 这个会使用到嘛？
+     def test_dataloader(self):
+         return DataLoader(
+@@ -79,3 +80,4 @@ class Text2SemanticDataModule(LightningDataModule):
+             shuffle=False,
+             collate_fn=self._train_dataset.collate,
+         )
++
+diff --git a/GPT_SoVITS/TTS_infer_pack/TTS.py b/GPT_SoVITS/TTS_infer_pack/TTS.py
+index 667f1a4..1aa5597 100644
+--- a/GPT_SoVITS/TTS_infer_pack/TTS.py
++++ b/GPT_SoVITS/TTS_infer_pack/TTS.py
+@@ -8,6 +8,7 @@ import traceback
+ from copy import deepcopy
+ 
+ import torchaudio
++import soundfile as sf
+ from tqdm import tqdm
+ 
+ now_dir = os.getcwd()
+@@ -47,6 +48,17 @@ def resample(audio_tensor, sr0, sr1, device):
+     return resample_transform_dict[key](audio_tensor)
+ 
+ 
++
++def load_audio_compat(path):
++    try:
++        return torchaudio.load(path)
++    except (ImportError, RuntimeError, OSError) as e:
++        message = str(e)
++        if not any(token in message for token in ("TorchCodec", "torchcodec", "libtorchcodec")):
++            raise
++        audio, sr = sf.read(path, dtype="float32", always_2d=True)
++        audio = torch.from_numpy(audio.T.copy())
++        return audio, sr
+ language = os.environ.get("language", "Auto")
+ language = sys.argv[-1] if sys.argv[-1] in scan_language_list() else language
+ i18n = I18nAuto(language=language)
+@@ -770,7 +782,7 @@ class TTS:
+             self.prompt_cache["refer_spec"][0] = spec_audio
+ 
+     def _get_ref_spec(self, ref_audio_path):
+-        raw_audio, raw_sr = torchaudio.load(ref_audio_path)
++        raw_audio, raw_sr = load_audio_compat(ref_audio_path)
+         raw_audio = raw_audio.to(self.configs.device).float()
+         self.prompt_cache["raw_audio"] = raw_audio
+         self.prompt_cache["raw_sr"] = raw_sr
+@@ -1824,3 +1836,4 @@ class TTS:
+             audio_fragments[i + 1] = f2_
+ 
+         return torch.cat(audio_fragments, 0).to(dtype)
++
+diff --git a/GPT_SoVITS/prepare_datasets/2-get-sv.py b/GPT_SoVITS/prepare_datasets/2-get-sv.py
+index 80b0ad6..d64f0f5 100644
+--- a/GPT_SoVITS/prepare_datasets/2-get-sv.py
++++ b/GPT_SoVITS/prepare_datasets/2-get-sv.py
+@@ -19,6 +19,7 @@ is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
+ 
+ import traceback
+ import torchaudio
++import soundfile as sf
+ 
+ now_dir = os.getcwd()
+ sys.path.append(now_dir)
+@@ -84,12 +85,24 @@ class SV:
+ sv = SV(device, is_half)
+ 
+ 
++def load_audio_compat(path):
++    try:
++        return torchaudio.load(path)
++    except (ImportError, RuntimeError, OSError) as e:
++        message = str(e)
++        if not any(token in message for token in ("TorchCodec", "torchcodec", "libtorchcodec")):
++            raise
++        audio, sr = sf.read(path, dtype="float32", always_2d=True)
++        audio = torch.from_numpy(audio.T.copy())
++        return audio, sr
++
++
+ def name2go(wav_name, wav_path):
+     sv_cn_path = "%s/%s.pt" % (sv_cn_dir, wav_name)
+     if os.path.exists(sv_cn_path):
+         return
+     wav_path = "%s/%s" % (wav32dir, wav_name)
+-    wav32k, sr0 = torchaudio.load(wav_path)
++    wav32k, sr0 = load_audio_compat(wav_path)
+     assert sr0 == 32000
+     wav32k = wav32k.to(device)
+     emb = sv.compute_embedding3(wav32k).cpu()  # torch.Size([1, 20480])
+@@ -113,3 +126,4 @@ for line in lines[int(i_part) :: int(all_parts)]:
+         name2go(wav_name, wav_path)
+     except:
+         print(line, traceback.format_exc())
++
+diff --git a/GPT_SoVITS/s1_train.py b/GPT_SoVITS/s1_train.py
+index 1176f0b..1377e9f 100644
+--- a/GPT_SoVITS/s1_train.py
++++ b/GPT_SoVITS/s1_train.py
+@@ -108,22 +108,26 @@ def main(args):
+     logger = TensorBoardLogger(name=output_dir.stem, save_dir=output_dir)
+     os.environ["MASTER_ADDR"] = "localhost"
+     os.environ["USE_LIBUV"] = "0"
++    cuda_available = torch.cuda.is_available()
++    cuda_device_count = torch.cuda.device_count() if cuda_available else 0
++    use_ddp = cuda_device_count > 1
+     trainer: Trainer = Trainer(
+         max_epochs=config["train"]["epochs"],
+-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
++        accelerator="gpu" if cuda_available else "cpu",
+         # val_check_interval=9999999999999999999999,###不要验证
+         # check_val_every_n_epoch=None,
+         limit_val_batches=0,
+-        devices=-1 if torch.cuda.is_available() else 1,
++        devices=cuda_device_count if cuda_available else 1,
+         benchmark=False,
+         fast_dev_run=False,
+         strategy=DDPStrategy(process_group_backend="nccl" if platform.system() != "Windows" else "gloo")
+-        if torch.cuda.is_available()
++        if use_ddp
+         else "auto",
+         precision=config["train"]["precision"],
+         logger=logger,
+         num_sanity_val_steps=0,
+         callbacks=[ckpt_callback],
++        enable_progress_bar=os.environ.get("GPT_SOVITS_ENABLE_PROGRESS_BAR", "1") == "1",
+         use_distributed_sampler=False,  # 非常简单的修改，但解决了采用自定义的 bucket_sampler 下训练步数不一致的问题！
+     )
+ 
+@@ -169,3 +173,4 @@ if __name__ == "__main__":
+     args = parser.parse_args()
+     logging.info(str(args))
+     main(args)
++
+diff --git a/GPT_SoVITS/s2_train.py b/GPT_SoVITS/s2_train.py
+index 333e6a0..de81d7a 100644
+--- a/GPT_SoVITS/s2_train.py
++++ b/GPT_SoVITS/s2_train.py
+@@ -50,6 +50,10 @@ global_step = 0
+ device = "cpu"  # cuda以外的设备，等mps优化后加入
+ 
+ 
++def unwrap_model(model):
++    return model.module if hasattr(model, "module") else model
++
++
+ def main():
+     if torch.cuda.is_available():
+         n_gpus = torch.cuda.device_count()
+@@ -58,14 +62,17 @@ def main():
+     os.environ["MASTER_ADDR"] = "localhost"
+     os.environ["MASTER_PORT"] = str(randint(20000, 55555))
+ 
+-    mp.spawn(
+-        run,
+-        nprocs=n_gpus,
+-        args=(
+-            n_gpus,
+-            hps,
+-        ),
+-    )
++    if n_gpus <= 1:
++        run(0, n_gpus, hps)
++    else:
++        mp.spawn(
++            run,
++            nprocs=n_gpus,
++            args=(
++                n_gpus,
++                hps,
++            ),
++        )
+ 
+ 
+ def run(rank, n_gpus, hps):
+@@ -77,12 +84,14 @@ def run(rank, n_gpus, hps):
+         writer = SummaryWriter(log_dir=hps.s2_ckpt_dir)
+         writer_eval = SummaryWriter(log_dir=os.path.join(hps.s2_ckpt_dir, "eval"))
+ 
+-    dist.init_process_group(
+-        backend="gloo" if os.name == "nt" or not torch.cuda.is_available() else "nccl",
+-        init_method="env://?use_libuv=False",
+-        world_size=n_gpus,
+-        rank=rank,
+-    )
++    use_ddp = torch.cuda.is_available() and n_gpus > 1
++    if use_ddp:
++        dist.init_process_group(
++            backend="gloo" if os.name == "nt" or not torch.cuda.is_available() else "nccl",
++            init_method="env://?use_libuv=False",
++            world_size=n_gpus,
++            rank=rank,
++        )
+     torch.manual_seed(hps.train.seed)
+     if torch.cuda.is_available():
+         torch.cuda.set_device(rank)
+@@ -116,16 +125,18 @@ def run(rank, n_gpus, hps):
+         shuffle=True,
+     )
+     collate_fn = TextAudioSpeakerCollate(version=hps.model.version)
+-    train_loader = DataLoader(
+-        train_dataset,
+-        num_workers=5,
++    dataloader_workers = int(os.environ.get("GPT_SOVITS_DATALOADER_WORKERS", "0" if os.name == "nt" else "5"))
++    train_loader_kwargs = dict(
++        dataset=train_dataset,
++        num_workers=dataloader_workers,
+         shuffle=False,
+         pin_memory=True,
+         collate_fn=collate_fn,
+         batch_sampler=train_sampler,
+-        persistent_workers=True,
+-        prefetch_factor=3,
+     )
++    if dataloader_workers > 0:
++        train_loader_kwargs.update(persistent_workers=True, prefetch_factor=3)
++    train_loader = DataLoader(**train_loader_kwargs)
+     # if rank == 0:
+     #     eval_dataset = TextAudioSpeakerLoader(hps.data.validation_files, hps.data, val=True)
+     #     eval_loader = DataLoader(eval_dataset, num_workers=0, shuffle=False,
+@@ -196,10 +207,10 @@ def run(rank, n_gpus, hps):
+         betas=hps.train.betas,
+         eps=hps.train.eps,
+     )
+-    if torch.cuda.is_available():
++    if use_ddp:
+         net_g = DDP(net_g, device_ids=[rank], find_unused_parameters=True)
+         net_d = DDP(net_d, device_ids=[rank], find_unused_parameters=True)
+-    else:
++    elif not torch.cuda.is_available():
+         net_g = net_g.to(device)
+         net_d = net_d.to(device)
+ 
+@@ -234,7 +245,7 @@ def run(rank, n_gpus, hps):
+                 logger.info("loaded pretrained %s" % hps.train.pretrained_s2G)
+             print(
+                 "loaded pretrained %s" % hps.train.pretrained_s2G,
+-                net_g.module.load_state_dict(
++                unwrap_model(net_g).load_state_dict(
+                     torch.load(hps.train.pretrained_s2G, map_location="cpu", weights_only=False)["weight"],
+                     strict=False,
+                 )
+@@ -253,7 +264,7 @@ def run(rank, n_gpus, hps):
+                 logger.info("loaded pretrained %s" % hps.train.pretrained_s2D)
+             print(
+                 "loaded pretrained %s" % hps.train.pretrained_s2D,
+-                net_d.module.load_state_dict(
++                unwrap_model(net_d).load_state_dict(
+                     torch.load(hps.train.pretrained_s2D, map_location="cpu", weights_only=False)["weight"], strict=False
+                 )
+                 if torch.cuda.is_available()
+@@ -556,7 +567,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
+             )
+         if rank == 0 and hps.train.if_save_every_weights == True:
+             if hasattr(net_g, "module"):
+-                ckpt = net_g.module.state_dict()
++                ckpt = unwrap_model(net_g).state_dict()
+             else:
+                 ckpt = net_g.state_dict()
+             logger.info(
+@@ -608,7 +619,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
+                 text, text_lengths = text.to(device), text_lengths.to(device)
+             for test in [0, 1]:
+                 y_hat, mask, *_ = (
+-                    generator.module.infer(
++                    unwrap_model(generator).infer(
+                         ssl,
+                         spec,
+                         spec_lengths,
+@@ -665,7 +676,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
+                 )
+                 audio_dict.update({f"gt/audio_{batch_idx}": y[0, :, : y_lengths[0]]})
+ 
+-        # y_hat, mask, *_ = generator.module.infer(ssl, spec_lengths, speakers, y=None)
++        # y_hat, mask, *_ = unwrap_model(generator).infer(ssl, spec_lengths, speakers, y=None)
+         # audio_dict.update({
+         #     f"gen/audio_{batch_idx}_style_pred": y_hat[0, :, :]
+         # })
+@@ -682,3 +693,6 @@ def evaluate(hps, generator, eval_loader, writer_eval):
+ 
+ if __name__ == "__main__":
+     main()
++
++
++

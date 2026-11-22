@@ -1,0 +1,7 @@
+# linux.in 里的 onnxruntime-gpu 只有 Linux / Windows 的 CUDA 版：在 macOS 上用 marker 把它去掉（uv 的 override 连 marker 一起替换），
+# CPU 版 onnxruntime 由 macos.in 加上。
+onnxruntime-gpu==1.23.2 ; sys_platform != "darwin"
+# scipy 1.15.3（Python 3.10 能用的最后一版）的 macosx_14_0_arm64 wheel（Accelerate 版，ld 1022.1 链接）里 8 个 gfortran 扩展
+# （PROPACK、ODEPACK、cobyla）的 __thread_bss 零填充段带非零文件偏移，macOS 27 的 dyld 拒绝加载（scipy.signal → librosa
+# 一导入就失败）。macosx_12_0_arm64 版（OpenBLAS，minos 12.3）同一版本、能正常加载，用直链钉它。
+scipy @ https://files.pythonhosted.org/packages/a0/6e/0c3bf90fae0e910c274db43304ebe25a6b391327f3f10b5dcc638c090795/scipy-1.15.3-cp310-cp310-macosx_12_0_arm64.whl#sha256=ad3432cb0f9ed87477a8d97f03b763fd1d57709f1bbde3c9369b1dff5503b253

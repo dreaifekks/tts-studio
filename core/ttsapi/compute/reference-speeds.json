@@ -1,0 +1,26 @@
+{
+ "version": 1,
+ "about": "参考值：没测过的「设备 × 引擎」先查这张表。数字是 hard 难句每句秒数（合成）；scorer 是评测时每条打分秒数（0 = 已含在合成里）；train_sec_per_line 是默认参数下训练每句的秒数。说明见同目录 reference-speeds.md",
+ "engine_mem_gb": {"v3": 14, "v4": 14, "v5turbo": 14, "v5dev": 14, "default": 4},
+ "cloud_upload_mb_per_sec": 2.4,
+ "cloud_upload_source": "控制端 → Colab L4 实测（917MB 约 6.5 分钟）",
+ "devices": [
+  {"id": "colab-L4", "label": "Colab L4（CUDA）", "match": {"gpu": "L4"}, "source": "1dca7e76 实测（评测每条，含打分）；v5turbo/v5dev 按 v4 × 1.33 / × 5 推算；训练 2026-11-21 v2proplus 2346 句实测 1.088",
+   "engines": {"v1": 4.7, "v2": 4.7, "v2pro": 4.7, "v2proplus": 4.7, "v4": 7.5, "v5turbo": 10.0, "v5dev": 38.0}, "scorer": 0, "train_sec_per_line": 1.1},
+  {"id": "colab-T4", "label": "Colab T4（CUDA）", "match": {"gpu": "T4"}, "source": "按 L4 × 1.6 推算",
+   "engines": {"v1": 7.5, "v2": 7.5, "v2pro": 7.5, "v2proplus": 7.5, "v4": 12, "v5turbo": 16.0, "v5dev": 60.0}, "scorer": 0, "train_sec_per_line": 1.75},
+  {"id": "colab-A100", "label": "Colab A100（CUDA）", "match": {"gpu": "A100"}, "source": "按 L4 × 0.6 推算",
+   "engines": {"v1": 2.8, "v2": 2.8, "v2pro": 2.8, "v2proplus": 2.8, "v4": 4.5, "v5turbo": 6.0, "v5dev": 23.0}, "scorer": 0, "train_sec_per_line": 0.66},
+  {"id": "colab-G4", "label": "Colab RTX PRO 6000（CUDA）", "match": {"gpu": "G4"}, "source": "按 L4 × 0.5 推算",
+   "engines": {"v1": 2.4, "v2": 2.4, "v2pro": 2.4, "v2proplus": 2.4, "v4": 3.8, "v5turbo": 5.0, "v5dev": 19.0}, "scorer": 0, "train_sec_per_line": 0.55},
+  {"id": "rtx-5070ti", "label": "RTX 5070 Ti（CUDA）", "match": {"gpu": "5070 Ti"}, "source": "tts-api EVAL_SEC_PER_ITEM（评测每条，含打分）",
+   "engines": {"v1": 3.5, "v2": 3.5, "v2pro": 3.5, "v2proplus": 3.5, "v3": 22, "v4": 6, "v5turbo": 10, "v5dev": 40}, "scorer": 0,
+   "train_sec_per_line": 3.0},
+  {"id": "apple-m6", "label": "Apple M6 32GB（CPU 6 线程，v4/v5turbo 用 MPS）", "match": {"cpu": "Apple M6"}, "source": "d08ff602 实测；v5turbo 按 v4 × 1.33 推算；训练按 L4 × 5 推算",
+   "engines": {"v2pro": 2.4, "v2proplus": 2.9, "v4": 31, "v5turbo": 42}, "scorer": 5, "train_sec_per_line": 5.5},
+  {"id": "ryzen-7840h", "label": "Ryzen 7840H（CPU 8 线程）", "match": {"cpu": "7840H"}, "source": "1dca7e76 实测",
+   "engines": {"v2pro": 8}, "scorer": 6},
+  {"id": "cpu", "label": "通用 CPU 8 核", "match": {}, "source": "design.md 第 4 节（推算；v4 在 CPU 上不推荐，不给值）",
+   "engines": {"v2pro": 8, "v2proplus": 10}, "scorer": 6}
+ ]
+}

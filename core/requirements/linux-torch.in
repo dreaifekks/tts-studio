@@ -1,0 +1,4 @@
+# Linux 的 PyTorch 依赖：torch 和 torchaudio 取 cu128 的 wheel，torchcodec 取 PyPI。
+torch==2.11.0
+torchaudio==2.11.0
+torchcodec==0.14.0

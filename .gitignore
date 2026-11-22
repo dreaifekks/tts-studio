@@ -1,0 +1,33 @@
+# macOS / Xcode
+.DS_Store
+build*/
+DerivedData/
+*.noindex/
+*.xcuserstate
+xcuserdata/
+*.xcconfig.local
+
+# Python / Core runtime
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+core/data/
+core/runtime/
+core/training/
+core/weights/
+
+# Web
+web/node_modules/
+web/dist/
+
+# Secrets & local overrides
+.env
+.env.*
+!.env.example
+*.local
+
+# Tooling
+.codex/
+.playwright-cli/
+output/playwright/
