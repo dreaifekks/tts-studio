@@ -7,7 +7,7 @@
 原生 macOS 客户端 · 桌面 / 移动端 Web 界面 · 文件夹资料库 · 局域网算力 & Google Colab GPU 调度
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-v0.2.0-2ea44f.svg)](https://github.com/dreaifekks/tts-studio/tags)
+[![Release](https://img.shields.io/github/v/release/dreaifekks/tts-studio?color=2ea44f&label=Release)](https://github.com/dreaifekks/tts-studio/releases)
 [![GPT-SoVITS](https://img.shields.io/badge/GPT--SoVITS-v1%20%E2%80%93%20v5-orange.svg)](https://github.com/RVC-Boss/GPT-SoVITS)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Web-lightgrey.svg)](#仓库结构)
 [![Stack](https://img.shields.io/badge/Stack-SwiftUI%20%C2%B7%20React%20%C2%B7%20FastAPI-6f42c1.svg)](#仓库结构)
@@ -66,7 +66,13 @@ Web UI (/ui/)     ──┘                         │
 
 ### 方式 A：macOS 客户端（推荐 macOS）
 
-前往 [Releases](https://github.com/dreaifekks/tts-studio/releases) 下载 `TTSStudio-*-macos-arm64.dmg` 并拖入 `/Applications`。首次启动选择「作为主控」即可在应用内一键安装并管理本机 Core 与 Web 界面，也可选择「连接到另一台」远程主控。
+通过 Homebrew 安装（已签名并经 Apple 公证，自动安装 `ffmpeg` 和 `uv`）：
+
+```sh
+brew install --cask dreaifekks/tap/tts-studio
+```
+
+或前往 [Releases](https://github.com/dreaifekks/tts-studio/releases) 手动下载 `TTSStudio-*-macos-arm64.dmg` 拖入 `/Applications`。首次启动选择「作为主控」即可在应用内一键安装并管理本机 Core 与 Web 界面，也可选择「连接到另一台」远程主控。
 
 ### 方式 B：Docker 部署（推荐 Linux / NVIDIA GPU）
 
