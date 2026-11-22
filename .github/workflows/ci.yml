@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web Check & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run lint
+          npm run test:blind
+          npm run build
+
+  scripts:
+    name: Shell Script Syntax Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          bash -n docker/entrypoint.sh \
+            core/scripts/gptsovits.sh \
+            core/scripts/install_linux.sh \
+            core/scripts/install_macos.sh \
+            core/scripts/install_control_macos.sh \
+            core/scripts/uninstall_control_macos.sh \
+            core/scripts/device/install.sh \
+            mac/script/package_macos.sh \
+            mac/script/stamp-version.sh \
+            mac/script/install.sh

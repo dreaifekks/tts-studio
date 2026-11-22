@@ -64,7 +64,26 @@ Web UI (/ui/)     ──┘                         │
 
 ## 快速开始
 
-### 1. 启动 Core 服务（macOS / Linux）
+### 方式 A：macOS 客户端（推荐 macOS）
+
+前往 [Releases](https://github.com/dreaifekks/tts-studio/releases) 下载 `TTSStudio-*-macos-arm64.dmg` 并拖入 `/Applications`。首次启动选择「作为主控」即可在应用内一键安装并管理本机 Core 与 Web 界面，也可选择「连接到另一台」远程主控。
+
+### 方式 B：Docker 部署（推荐 Linux / NVIDIA GPU）
+
+```sh
+git clone https://github.com/dreaifekks/tts-studio.git
+cd tts-studio
+
+# NVIDIA GPU（CUDA 12.8）
+docker compose up -d
+
+# 仅 CPU
+docker compose --profile cpu up -d
+```
+
+启动后浏览器打开 `http://localhost:9880/ui/`（首次启动会自动下载 `TTSAPI_ENGINES` 指定的底模到 `./models` 持久化卷）。也可直接拉取预构建镜像：`ghcr.io/dreaifekks/tts-studio:latest`（CUDA）或 `:cpu`。
+
+### 方式 C：从源码安装 Core 服务（macOS / Linux）
 
 前置依赖：`git`、`curl`、`uv`、`ffmpeg`（macOS 另需 Xcode Command Line Tools）。
 
@@ -98,7 +117,7 @@ curl -fsS -X POST http://127.0.0.1:9880/library \
 
 更多配置（开机自启、局域网 worker 配对、Colab GPU、V5 引擎）见 [core/README.md](core/README.md)。
 
-### 2. 构建 Mac 客户端（macOS）
+### 从源码构建 Mac 客户端（macOS）
 
 前置依赖：Apple Silicon Mac、支持 Swift 6 的 Xcode（如希望随包内嵌 Web 界面，另需 Node.js 22.12+）。
 
@@ -110,7 +129,7 @@ open /Applications/TTSStudio.app
 
 首次启动可选择「作为主控」（支持在应用内安装并管理本机 Core）或「连接到另一台」。详见 [mac/README.md](mac/README.md)。
 
-### 3. 构建或本地开发 Web 界面
+### 从源码构建或本地开发 Web 界面
 
 ```sh
 cd tts-studio/web

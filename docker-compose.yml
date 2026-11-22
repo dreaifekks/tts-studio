@@ -1,0 +1,39 @@
+services:
+  tts-studio:
+    image: ghcr.io/dreaifekks/tts-studio:latest
+    container_name: tts-studio
+    restart: unless-stopped
+    ports:
+      - "9880:9880"
+    environment:
+      # Engines to auto-download pretrained models for on first boot
+      # Available: v2pro, v2proplus, v4, v5turbo, v5dev
+      TTSAPI_ENGINES: "v2pro,v2proplus"
+      TTSAPI_AUTO_DOWNLOAD_MODELS: "1"
+    volumes:
+      - ./data:/data
+      - ./library:/library
+      - ./models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # CPU-only profile: docker compose --profile cpu up -d
+  tts-studio-cpu:
+    profiles: ["cpu"]
+    image: ghcr.io/dreaifekks/tts-studio:cpu
+    container_name: tts-studio-cpu
+    restart: unless-stopped
+    ports:
+      - "9880:9880"
+    environment:
+      TTSAPI_ENGINES: "v2pro,v2proplus"
+      TTSAPI_AUTO_DOWNLOAD_MODELS: "1"
+    volumes:
+      - ./data:/data
+      - ./library:/library
+      - ./models:/models

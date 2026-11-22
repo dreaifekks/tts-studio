@@ -1,0 +1,16 @@
+.git
+.github
+docs
+mac
+*.md
+!core/README.md
+web/node_modules
+web/dist
+core/tests
+core/data
+core/runtime
+core/training
+core/weights
+**/__pycache__
+**/*.pyc
+.DS_Store

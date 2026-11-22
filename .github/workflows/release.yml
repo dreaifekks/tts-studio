@@ -1,0 +1,233 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      push_docker:
+        description: "Push Docker images to GHCR on manual run"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-macos-dmg:
+    name: Build macOS DMG
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Import Developer ID certificate
+        shell: bash
+        env:
+          MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          MACOS_SIGNING_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$MACOS_SIGNING_P12" ]]; then
+            echo "::notice::MACOS_SIGNING_P12 is not set; DMG will be ad-hoc signed"
+            exit 0
+          fi
+
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          cert_file="$RUNNER_TEMP/signing.p12"
+
+          printf '%s' "$MACOS_SIGNING_P12" | base64 --decode >"$cert_file"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$cert_file" -P "$MACOS_SIGNING_PASSWORD" -f pkcs12 \
+            -k "$keychain" -T /usr/bin/codesign
+          rm -f "$cert_file"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$keychain" >/dev/null
+
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+
+          line="$(security find-identity -v -p codesigning "$keychain" \
+            | grep '"Developer ID Application: ' | head -n 1 || true)"
+          identity="$(printf '%s' "$line" | awk '{print $2}')"
+          cname="$(printf '%s' "$line" | sed -n 's/.*"\(.*\)".*/\1/p')"
+          if [[ -z "$identity" ]]; then
+            echo "::error::MACOS_SIGNING_P12 does not contain a Developer ID Application identity"
+            exit 1
+          fi
+
+          # Mask developer identity name and Team ID in public logs
+          if [[ -n "$cname" ]]; then
+            echo "::add-mask::$cname"
+            team_id="$(printf '%s' "$cname" | sed -n 's/.*(\([A-Z0-9]\{10\}\)).*/\1/p')"
+            [[ -n "$team_id" ]] && echo "::add-mask::$team_id"
+          fi
+          echo "CODESIGN_IDENTITY=$identity" >>"$GITHUB_ENV"
+
+      - name: Build, sign, and notarize DMG
+        shell: bash
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${CODESIGN_IDENTITY:-}" && -n "$APPLE_API_KEY_P8_BASE64" ]]; then
+            export NOTARIZE=1
+          else
+            export NOTARIZE=0
+            if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
+              export CODESIGN_IDENTITY=-
+            fi
+          fi
+          bash mac/script/package_macos.sh
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          if-no-files-found: error
+
+  build-docker:
+    name: Build Docker (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cuda
+            torch: cu128
+            tag_suffix: ""
+            latest_tag: "latest"
+            alias_tag: "cuda"
+          - variant: cpu
+            torch: cpu
+            tag_suffix: "-cpu"
+            latest_tag: "cpu"
+            alias_tag: ""
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version and tags
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver="$(bash mac/script/version.sh)"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          should_push="false"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            should_push="true"
+            tag="${GITHUB_REF_NAME}"
+          elif [[ "${{ inputs.push_docker }}" == "true" ]]; then
+            should_push="true"
+            tag="v${ver}"
+          else
+            tag="v${ver}"
+          fi
+
+          tags="${image}:${tag}${TAG_SUFFIX}"
+          if [[ -n "${LATEST_TAG}" ]]; then
+            tags="${tags}"$'\n'"${image}:${LATEST_TAG}"
+          fi
+          if [[ -n "${ALIAS_TAG}" ]]; then
+            tags="${tags}"$'\n'"${image}:${ALIAS_TAG}"
+          fi
+
+          echo "version=${ver}" >>"$GITHUB_OUTPUT"
+          echo "push=${should_push}" >>"$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "$tags"
+            echo "EOF"
+          } >>"$GITHUB_OUTPUT"
+        env:
+          TAG_SUFFIX: ${{ matrix.tag_suffix }}
+          LATEST_TAG: ${{ matrix.latest_tag }}
+          ALIAS_TAG: ${{ matrix.alias_tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: steps.meta.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ steps.meta.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            TORCH=${{ matrix.torch }}
+            TTS_VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha,scope=tts-studio-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=tts-studio-${{ matrix.variant }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+
+  publish-release:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [build-macos-dmg, build-docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download DMG artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist
+
+      - name: Create or update Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GH_REPO,,}"
+          notes="$(printf '## Docker Images\n\n```sh\n# NVIDIA CUDA 12.8\ndocker pull %s:%s\n\n# CPU-only\ndocker pull %s:%s-cpu\n```\n' "$image" "$TAG" "$image" "$TAG")"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "$TAG" --notes "$notes" --latest
+          fi
